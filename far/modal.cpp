@@ -32,52 +32,66 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// BUGBUG
+#include "platform.headers.hpp"
+
+// Self:
 #include "modal.hpp"
 
+// Internal:
 #include "help.hpp"
 #include "global.hpp"
 
-void SimpleModal::Process()
+// Platform:
+
+// Common:
+
+// External:
+
+//----------------------------------------------------------------------------
+
+void Modal::Process()
 {
 	Global->WindowManager->ExecuteWindow(shared_from_this());
 	Global->WindowManager->ExecuteModal(shared_from_this());
 }
 
-bool SimpleModal::Done() const
+bool Modal::Done() const
 {
 	return m_EndLoop;
 }
 
-void SimpleModal::ClearDone()
+void Modal::ClearDone()
 {
 	m_EndLoop=false;
 }
 
-void SimpleModal::SetDone()
+void Modal::SetDone()
 {
 	m_EndLoop=true;
 }
 
-void SimpleModal::SetExitCode(int Code)
+void Modal::SetExitCode(int Code)
 {
 	m_ExitCode=Code;
 	SetDone();
 }
 
-void SimpleModal::Close(int Code)
+void Modal::Close(int Code)
 {
+	OnClose();
 	SetExitCode(Code);
 	Hide();
 	Global->WindowManager->DeleteWindow(shared_from_this());
 }
 
-void SimpleModal::SetHelp(string_view const Topic)
+void Modal::SetHelp(string_view const Topic)
 {
-	assign(m_HelpTopic, Topic);
+	m_HelpTopic = Topic;
 }
 
-void SimpleModal::ShowHelp() const
+void Modal::ShowHelp() const
 {
 	if (!m_HelpTopic.empty())
-		Help::create(m_HelpTopic);
+		help::show(m_HelpTopic);
 }

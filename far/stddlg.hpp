@@ -35,6 +35,21 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
+#include "windowsfwd.hpp"
+#include "dialog.hpp"
+
+// Platform:
+
+// Common:
+#include "common/function_ref.hpp"
+#include "common/preprocessor.hpp"
+#include "common/utility.hpp"
+
+// External:
+
+//----------------------------------------------------------------------------
+
 enum class lng : int;
 class RegExp;
 struct error_state_ex;
@@ -50,7 +65,7 @@ struct error_state_ex;
 
     Title
       Заголовок диалога.
-      nullptr -> применяется MEditReplaceTitle или MEditSearchTitle в зависимости от параметра IsReplaceMode
+      Если пустая строка, то применяется MEditReplaceTitle или MEditSearchTitle в зависимости от параметра IsReplaceMode
 
     SearchStr
       Строка поиска.
@@ -63,15 +78,11 @@ struct error_state_ex;
 
     TextHistoryName
       Имя истории строки поиска.
-      Если установлено в nullptr, то по умолчанию
-      принимается значение "SearchText"
-      Если установлено в пустую строку, то история вестись не будет
+      Если пустая строка, то принимается значение "SearchText"
 
     ReplaceHistoryName
       Имя истории строки замены.
-      Если установлено в nullptr, то по умолчанию
-      принимается значение "ReplaceText"
-      Если установлено в пустую строку, то история вестись не будет
+      Если пустая строка, то принимается значение "ReplaceText"
 
     Case
       Ссылка на переменную, указывающую на значение опции "Case sensitive"
@@ -93,7 +104,7 @@ struct error_state_ex;
 
     HelpTopic
       Имя темы помощи.
-      Если nullptr или пустая строка - тема помощи не назначается.
+      Если пустая строка - тема помощи не назначается.
 
   Возвращаемое значение:
   0 - пользователь отказался от диалога (Esc)
@@ -102,27 +113,27 @@ struct error_state_ex;
 
 */
 int GetSearchReplaceString(
-    bool IsReplaceMode,
-    const wchar_t *Title,
-    const wchar_t *SubTitle,
-    string& SearchStr,
-    string& ReplaceStr,
-    const wchar_t *TextHistoryName,
-    const wchar_t *ReplaceHistoryName,
-    bool* Case,
-    bool* WholeWords,
-    bool* Reverse,
-    bool* Regexp,
-    bool* PreserveStyle,
-    const wchar_t *HelpTopic=nullptr,
-    bool HideAll=false,
-    const GUID* Id = nullptr,
-    const std::function<string(bool)>& Picker = nullptr
+	bool IsReplaceMode,
+	string_view Title,
+	string_view SubTitle,
+	string& SearchStr,
+	string& ReplaceStr,
+	string_view TextHistoryName,
+	string_view ReplaceHistoryName,
+	bool* pCase,
+	bool* pWholeWords,
+	bool* pReverse,
+	bool* pRegexp,
+	bool* pPreserveStyle,
+	string_view HelpTopic = {},
+	bool HideAll=false,
+	const UUID* Id = nullptr,
+	function_ref<string(bool)> Picker = nullptr
 );
 
 bool GetString(
 	string_view Title,
-	string_view SubTitle,
+	string_view Prompt,
 	string_view HistoryName,
 	string_view SrcText,
 	string &strDestText,
@@ -131,28 +142,43 @@ bool GetString(
 	int* CheckBoxValue = {},
 	string_view CheckBoxText = {},
 	class Plugin* PluginNumber = {},
-	const GUID* Id = {}
+	const UUID* Id = {}
 );
 
 // для диалога GetNameAndPassword()
 enum FlagsNameAndPassword
 {
-	GNP_USELAST      = 0x00000001UL, // использовать последние введенные данные
+	GNP_USELAST      = 0_bit, // использовать последние введенные данные
 };
 
-bool GetNameAndPassword(const string& Title,string &strUserName, string &strPassword, const wchar_t *HelpTopic,DWORD Flags);
+bool GetNameAndPassword(string_view Title, string& strUserName, string& strPassword, string_view HelpTopic, DWORD Flags);
 
 enum class operation
 {
 	retry,
 	skip,
 	skip_all,
-	cancel,
+	cancel
 };
 
-operation OperationFailed(const error_state_ex& ErrorState, const string& Object, lng Title, const string& Description, bool AllowSkip = true);
+operation OperationFailed(const error_state_ex& ErrorState, string_view Object, lng Title, string Description, bool AllowSkip = true, bool AllowSkipAll = true);
 
-void ReCompileErrorMessage(const RegExp& re, const string& str);
+class operation_cancelled final: public std::exception
+{
+};
+
+[[noreturn]]
+inline void cancel_operation()
+{
+	throw operation_cancelled{};
+}
+
+// true: success
+// false: skip
+// operation_cancelled exception: cancelled
+bool retryable_ui_operation(function_ref<bool()> Action, string_view Name, lng ErrorDescription, bool& SkipErrors);
+
+void ReCompileErrorMessage(const RegExp& re, string_view str);
 void ReMatchErrorMessage(const RegExp& re);
 
 struct goto_coord
@@ -164,5 +190,41 @@ struct goto_coord
 };
 
 bool GoToRowCol(goto_coord& Row, goto_coord& Col, bool& Hex, string_view HelpTopic);
+
+bool ConfirmAbort();
+bool CheckForEscAndConfirmAbort();
+bool RetryAbort(std::vector<string>&& Messages);
+
+class progress_impl
+{
+protected:
+	NONCOPYABLE(progress_impl);
+
+	progress_impl() = default;
+	~progress_impl();
+
+	void init(span<DialogItemEx> Items, rectangle Position);
+
+	dialog_ptr m_Dialog;
+};
+
+class single_progress: progress_impl
+{
+public:
+	single_progress(string_view Title, string_view Msg, size_t Percent);
+
+	void update(string_view Msg) const;
+	void update(size_t Percent) const;
+};
+
+class dirinfo_progress: progress_impl
+{
+public:
+	explicit dirinfo_progress(string_view Title);
+
+	void set_name(string_view Msg) const;
+	void set_count(unsigned long long Count) const;
+	void set_size(unsigned long long Size) const;
+};
 
 #endif // STDDLG_HPP_D7E3481D_D478_4F57_8C20_7E0A21FAE788

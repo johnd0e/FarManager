@@ -35,7 +35,16 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
 #include "scrobj.hpp"
+
+// Platform:
+
+// Common:
+
+// External:
+
+//----------------------------------------------------------------------------
 
 struct KeyBarTitles;
 enum class lng : int;
@@ -75,7 +84,7 @@ enum KEYBARAREA
 	KBA_COUNT
 };
 
-class KeyBar: public SimpleScreenObject
+class KeyBar final: public SimpleScreenObject
 {
 public:
 	explicit KeyBar(window_ptr Owner);

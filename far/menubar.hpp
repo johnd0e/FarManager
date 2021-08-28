@@ -35,9 +35,18 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
 #include "scrobj.hpp"
 
-class MenuBar: public SimpleScreenObject
+// Platform:
+
+// Common:
+
+// External:
+
+//----------------------------------------------------------------------------
+
+class MenuBar final: public SimpleScreenObject
 {
 public:
 	explicit MenuBar(window_ptr Owner):

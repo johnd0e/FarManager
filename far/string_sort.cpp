@@ -29,17 +29,32 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// BUGBUG
+#include "platform.headers.hpp"
+
+// Self:
 #include "string_sort.hpp"
 
+// Internal:
 #include "string_utils.hpp"
 #include "config.hpp"
 #include "global.hpp"
+#include "imports.hpp"
+
+// Platform:
+
+// Common:
+
+// External:
+
+//----------------------------------------------------------------------------
 
 template<typename comparer>
 static int per_char_compare(const string_view Str1, const string_view Str2, const comparer Comparer)
 {
-	auto Iterator = std::make_pair(Str1.cbegin(), Str2.cbegin());
-	const auto End = std::make_pair(Str1.cend(), Str2.cend());
+	// VS2019 bug - 'classic' CTAD breaks the compilation here
+	auto Iterator = std::pair(Str1.cbegin(), Str2.cbegin());
+	const auto End = std::pair(Str1.cend(), Str2.cend());
 
 	while (Iterator.first != End.first && Iterator.second != End.second)
 	{
@@ -58,83 +73,114 @@ static int per_char_compare(const string_view Str1, const string_view Str2, cons
 	return Iterator.first == End.first? -1 : 1;
 }
 
-static int number_comparer(string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
+struct numeric_comparer
 {
-	const auto& IsZero = [](wchar_t Char) { return Char == L'0'; };
-
-	const auto Begin1 = It1;
-	const auto Begin2 = It2;
-
-	It1 = std::find_if_not(It1, End1, IsZero);
-	It2 = std::find_if_not(It2, End2, IsZero);
-
-	// 00 is less than 0 in Windows numeric sort implementation
-	const auto ZerosResult = static_cast<int>((It2 - Begin2) - (It1 - Begin1));
-
-	if (It1 == End1 && It2 == End2)
-		return ZerosResult;
-
-	int Result = 0;
-	while (It1 != End1 && It2 != End2 && std::iswdigit(*It1) && std::iswdigit(*It2))
+	int operator()(string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2) const
 	{
-		if (!Result && *It1 != *It2)
-			Result = *It1 - *It2;
+		const auto IsZero = [](wchar_t Char) { return Char == L'0'; };
 
-		++It1;
-		++It2;
+		const auto Begin1 = It1;
+		const auto Begin2 = It2;
+
+		It1 = std::find_if_not(It1, End1, IsZero);
+		It2 = std::find_if_not(It2, End2, IsZero);
+
+		// 00 is less than 0 in Windows numeric sort implementation
+		const auto ZerosResult = static_cast<int>((It2 - Begin2) - (It1 - Begin1));
+
+		if (It1 == End1 && It2 == End2)
+			return ZerosResult;
+
+		int Result = 0;
+		while (It1 != End1 && It2 != End2 && std::iswdigit(*It1) && std::iswdigit(*It2))
+		{
+			if (!Result && *It1 != *It2)
+				Result = *It1 - *It2;
+
+			++It1;
+			++It2;
+		}
+
+		const auto EndOrNonDigit1 = It1 == End1 || !std::iswdigit(*It1);
+		const auto EndOrNonDigit2 = It2 == End2 || !std::iswdigit(*It2);
+
+		if (EndOrNonDigit1 && EndOrNonDigit2)
+			return Result? Result : ZerosResult;
+
+		return EndOrNonDigit1? -1 : 1;
+	}
+};
+
+struct ordinal_comparer
+{
+	int operator()(wchar_t const Char1, wchar_t const Char2) const
+	{
+		return static_cast<int>(Char1) - static_cast<int>(Char2);
 	}
 
-	const auto EndOrNonDigit1 = It1 == End1 || !std::iswdigit(*It1);
-	const auto EndOrNonDigit2 = It2 == End2 || !std::iswdigit(*It2);
+	static constexpr bool ignore_case = false;
+};
 
-	if (EndOrNonDigit1 && EndOrNonDigit2)
-		return Result? Result : ZerosResult;
-
-	return EndOrNonDigit1? -1 : 1;
-}
-
-static int ordinal_comparer(wchar_t Char1, wchar_t Char2)
+struct ordinal_comparer_icase
 {
-	return static_cast<int>(Char1) - static_cast<int>(Char2);
+	int operator()(wchar_t const Char1, wchar_t const Char2) const
+	{
+		if (Char1 == Char2)
+			return 0;
+
+		return ordinal_comparer{}(upper(Char1), upper(Char2));
+	}
+
+	static constexpr bool ignore_case = true;
+};
+
+template<typename Comparer>
+static int compare_ordinal_t(const string_view Str1, const string_view Str2)
+{
+	if (imports.CompareStringOrdinal)
+	{
+		if (const auto Result = imports.CompareStringOrdinal(Str1.data(), static_cast<int>(Str1.size()), Str2.data(), static_cast<int>(Str2.size()), Comparer::ignore_case))
+			return Result - 2;
+	}
+
+	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator, string_view::const_iterator& It2, string_view::const_iterator)
+	{
+		return Comparer{}(*It1++, *It2++);
+	});
 }
 
 static int compare_ordinal(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator, string_view::const_iterator& It2, string_view::const_iterator)
-	{
-		return ordinal_comparer(*It1++, *It2++);
-	});
+	return compare_ordinal_t<ordinal_comparer>(Str1, Str2);
 }
 
 static int compare_ordinal_icase(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator, string_view::const_iterator& It2, string_view::const_iterator)
+	return compare_ordinal_t<ordinal_comparer_icase>(Str1, Str2);
+}
+
+template<typename Comparer>
+static int compare_numeric_t(const string_view Str1, const string_view Str2)
+{
+	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
 	{
-		return ordinal_comparer(upper(*It1++), upper(*It2++));
+		return std::iswdigit(*It1) && std::iswdigit(*It2)?
+			numeric_comparer{}(It1, End1, It2, End2) :
+			Comparer{}(*It1++, *It2++);
 	});
 }
 
 static int compare_ordinal_numeric(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
-	{
-		return std::iswdigit(*It1) && std::iswdigit(*It2) ?
-			number_comparer(It1, End1, It2, End2) :
-			ordinal_comparer(*It1++, *It2++);
-	});
+	return compare_numeric_t<ordinal_comparer>(Str1, Str2);
 }
 
 static int compare_ordinal_numeric_icase(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [](string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
-	{
-		return std::iswdigit(*It1) && std::iswdigit(*It2) ?
-			number_comparer(It1, End1, It2, End2) :
-			ordinal_comparer(upper(*It1++), upper(*It2++));
-	});
+	return compare_numeric_t<ordinal_comparer_icase>(Str1, Str2);
 }
 
-static auto create_alt_sort_table()
+static const auto& create_alt_sort_table()
 {
 	static_assert(sizeof(wchar_t) == 2, "4 GB for a sort table is too much, rewrite it.");
 	static const auto TableSize = std::numeric_limits<wchar_t>::max() + 1;
@@ -186,17 +232,34 @@ static auto create_alt_sort_table()
 	return alt_sort_table;
 }
 
-static int invariant_comparer(wchar_t Char1, wchar_t Char2)
+struct invariant_comparer
 {
-	static const auto SortTable = create_alt_sort_table();
-	return SortTable[Char1] - SortTable[Char2];
-}
+	int operator()(wchar_t const Char1, wchar_t const Char2) const
+	{
+		if (Char1 == Char2)
+			return 0;
+
+		static const auto& SortTable = create_alt_sort_table();
+		return SortTable[Char1] - SortTable[Char2];
+	}
+};
+
+struct invariant_comparer_icase
+{
+	int operator()(wchar_t const Char1, wchar_t const Char2) const
+	{
+		if (Char1 == Char2)
+			return 0;
+
+		return invariant_comparer{}(upper(Char1), upper(Char2));
+	}
+};
 
 static int compare_invariant(const string_view Str1, const string_view Str2)
 {
 	return per_char_compare(Str1, Str2, [&](string_view::const_iterator& It1, string_view::const_iterator, string_view::const_iterator& It2, string_view::const_iterator)
 	{
-		return invariant_comparer(*It1++, *It2++);
+		return invariant_comparer{}(*It1++, *It2++);
 	});
 }
 
@@ -204,28 +267,18 @@ static int compare_invariant_icase(const string_view Str1, const string_view Str
 {
 	return per_char_compare(Str1, Str2, [&](string_view::const_iterator& It1, string_view::const_iterator, string_view::const_iterator& It2, string_view::const_iterator)
 	{
-		return invariant_comparer(upper(*It1++), upper(*It2++));
+		return invariant_comparer{}(upper(*It1++), upper(*It2++));
 	});
 }
 
 static int compare_invariant_numeric(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [&](string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
-	{
-		return std::iswdigit(*It1) && std::iswdigit(*It2)?
-			number_comparer(It1, End1, It2, End2) :
-			invariant_comparer(*It1++, *It2++);
-	});
+	return compare_numeric_t<invariant_comparer>(Str1, Str2);
 }
 
 static int compare_invariant_numeric_icase(const string_view Str1, const string_view Str2)
 {
-	return per_char_compare(Str1, Str2, [&](string_view::const_iterator& It1, string_view::const_iterator const End1, string_view::const_iterator& It2, string_view::const_iterator const End2)
-	{
-		return std::iswdigit(*It1) && std::iswdigit(*It2)?
-			number_comparer(It1, End1, It2, End2) :
-			invariant_comparer(upper(*It1++), upper(*It2++));
-	});
+	return compare_numeric_t<invariant_comparer_icase>(Str1, Str2);
 }
 
 static int compare_natural_base(const string_view Str1, const string_view Str2, const bool Numeric, const bool CaseSensitive)
@@ -233,9 +286,9 @@ static int compare_natural_base(const string_view Str1, const string_view Str2, 
 	static const auto Windows7OrGreater = IsWindows7OrGreater();
 	static const auto WindowsVistaOrGreater = Windows7OrGreater || IsWindowsVistaOrGreater();
 
-	static const DWORD CaseFlags[][2] =
+	static const DWORD CaseFlags[][2]
 	{
-		{ NORM_IGNORECASE, 0 },
+		{ NORM_IGNORECASE,       0 },
 		{ LINGUISTIC_IGNORECASE, NORM_LINGUISTIC_CASING }
 	};
 
@@ -257,9 +310,9 @@ static int compare_natural_base(const string_view Str1, const string_view Str2, 
 	if (const auto Result = CompareString(LOCALE_USER_DEFAULT, Flags, Str1.data(), static_cast<int>(Str1.size()), Str2.data(), static_cast<int>(Str2.size())))
 		return Result - 2;
 
-	static const decltype(&string_sort::compare) FallbackComparers[2][2] =
+	static const decltype(&string_sort::compare) FallbackComparers[2][2]
 	{
-		{ compare_invariant_icase, compare_invariant },
+		{ compare_invariant_icase,         compare_invariant },
 		{ compare_invariant_numeric_icase, compare_invariant_numeric },
 	};
 
@@ -295,19 +348,19 @@ int string_sort::compare(const string_view Str1, const string_view Str2)
 
 void string_sort::adjust_comparer()
 {
-	static const decltype(&compare) Comparers[][2][2] =
+	static const decltype(&compare) Comparers[][2][2]
 	{
 		{
-			{ compare_ordinal_icase, compare_ordinal },
-			{ compare_ordinal_numeric_icase, compare_ordinal_numeric },
+			{ compare_ordinal_icase,           compare_ordinal },
+			{ compare_ordinal_numeric_icase,   compare_ordinal_numeric },
 		},
 		{
-			{ compare_invariant_icase, compare_invariant },
+			{ compare_invariant_icase,         compare_invariant },
 			{ compare_invariant_numeric_icase, compare_invariant_numeric },
 		},
 		{
-			{ compare_natural_icase, compare_natural },
-			{ compare_natural_numeric_icase, compare_natural_numeric },
+			{ compare_natural_icase,           compare_natural },
+			{ compare_natural_numeric_icase,   compare_natural_numeric },
 		},
 	};
 
@@ -316,29 +369,74 @@ void string_sort::adjust_comparer()
 	DefaultComparer = Comparers[CollationIdex][Global->Opt->Sort.DigitsAsNumbers][Global->Opt->Sort.CaseSensitive];
 }
 
-SELF_TEST(
-	assert(compare_invariant_numeric_icase(L""sv, L""sv) == 0);
-	assert(compare_invariant_numeric_icase(L""sv, L"a"sv) < 0);
-	assert(compare_invariant_numeric_icase(L"a"sv, L"a"sv) == 0);
+int string_sort::keyhole::compare_ordinal_icase(string_view const Str1, string_view const Str2)
+{
+	return ::compare_ordinal_icase(Str1, Str2);
+}
 
-	assert(compare_invariant_numeric_icase(L"0"sv, L"1"sv) < 0);
-	assert(compare_invariant_numeric_icase(L"0"sv, L"00"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"1"sv, L"00"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"10"sv, L"1"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"10"sv, L"2"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"10"sv, L"0100"sv) < 0);
-	assert(compare_invariant_numeric_icase(L"1"sv, L"001"sv) > 0);
+int string_sort::keyhole::compare_ordinal_numeric(string_view const Str1, string_view const Str2)
+{
+	return ::compare_ordinal_numeric(Str1, Str2);
+}
 
-	assert(compare_invariant_numeric_icase(L"10a"sv, L"2b"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"10a"sv, L"0100b"sv) < 0);
-	assert(compare_invariant_numeric_icase(L"a1a"sv, L"a001a"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"a1b2c"sv, L"a1b2c"sv) == 0);
-	assert(compare_invariant_numeric_icase(L"a01b2c"sv, L"a1b002c"sv) < 0);
-	assert(compare_invariant_numeric_icase(L"a01b3c"sv, L"a1b002"sv) < 0);
+#ifdef ENABLE_TESTS
 
-	assert(compare_invariant_numeric_icase(L"10"sv, L"01"sv) > 0);
-	assert(compare_invariant_numeric_icase(L"01"sv, L"01"sv) == 0);
+#include "testing.hpp"
 
-	assert(compare_invariant_numeric_icase(L"A1"sv, L"a2"sv) < 0);
-	assert(compare_invariant_numeric(L"A1"sv, L"a2"sv) < 0);
-)
+TEST_CASE("strings.sorting")
+{
+	static const struct
+	{
+		string_view Str1, Str2;
+		int CaseResult;
+		int IcaseResult;
+	}
+	Tests[]
+	{
+		{ {},          {},                 0,  0, },
+		{ {},          L"a"sv,            -1, -1, },
+		{ L"a"sv,      L"a"sv,             0,  0, },
+		{ L"a"sv,      L"A"sv,             1,  0, },
+
+		{ L"0"sv,      L"1"sv,            -1, -1, },
+		{ L"0"sv,      L"00"sv,            1,  1, },
+		{ L"1"sv,      L"00"sv,            1,  1, },
+		{ L"10"sv,     L"1"sv,             1,  1, },
+		{ L"10"sv,     L"2"sv,             1,  1, },
+		{ L"10"sv,     L"0100"sv,         -1, -1, },
+		{ L"1"sv,      L"001"sv,           1,  1, },
+
+		{ L"10a"sv,    L"2b"sv,            1,  1, },
+		{ L"10a"sv,    L"0100b"sv,        -1, -1, },
+		{ L"a1a"sv,    L"a001a"sv,         1,  1, },
+		{ L"a1b2c"sv,  L"a1b2c"sv,         0,  0, },
+		{ L"a01b2c"sv, L"a1b002c"sv,      -1, -1, },
+		{ L"a01b3c"sv, L"a1b002"sv,       -1, -1, },
+
+		{ L"10"sv,     L"01"sv,            1,  1, },
+		{ L"01"sv,     L"01"sv,            0,  0, },
+
+		{ L"A1"sv,     L"a2"sv,           -1, -1, },
+		{ L"a1"sv,     L"A2"sv,            1, -1, },
+	};
+
+	const auto normalise = [](int const Result)
+	{
+		return Result < 0? -1 : Result > 0? 1 : 0;
+	};
+
+	const auto invert = [](int const Result)
+	{
+		return Result < 0? 1 : Result > 0 ? -1 : 0;
+	};
+
+	for (const auto& i: Tests)
+	{
+		REQUIRE(normalise(compare_invariant_numeric(i.Str1, i.Str2)) == i.CaseResult);
+		REQUIRE(normalise(compare_invariant_numeric_icase(i.Str1, i.Str2)) == i.IcaseResult);
+
+		REQUIRE(invert(compare_invariant_numeric(i.Str2, i.Str1)) == i.CaseResult);
+		REQUIRE(invert(compare_invariant_numeric_icase(i.Str2, i.Str1)) == i.IcaseResult);
+	}
+}
+#endif

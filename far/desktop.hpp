@@ -34,10 +34,19 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
 #include "window.hpp"
 #include "console_session.hpp"
 
-class desktop: public window
+// Platform:
+
+// Common:
+
+// External:
+
+//----------------------------------------------------------------------------
+
+class desktop final: public window
 {
 	struct private_tag {};
 

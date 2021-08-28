@@ -33,44 +33,65 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
+
+// Platform:
+
+// Common:
+#include "common/preprocessor.hpp"
+
+// External:
+
+//----------------------------------------------------------------------------
+
 namespace os::env
 {
 	namespace provider
 	{
-		namespace detail
-		{
-			class provider: noncopyable
-			{
-			public:
-				const wchar_t* data() const;
-
-			protected:
-				provider() = default;
-
-				wchar_t* m_Data;
-			};
-		}
-
-		class strings: public detail::provider
+		class strings
 		{
 		public:
+			NONCOPYABLE(strings);
+
 			strings();
 			~strings();
+
+			[[nodiscard]]
+			const wchar_t* data() const;
+
+		private:
+			wchar_t* m_Data{};
 		};
 
-		class block: public detail::provider
+		class block
 		{
 		public:
+			NONCOPYABLE(block);
+
 			block();
 			~block();
+
+			[[nodiscard]]
+			const wchar_t* data() const;
+
+		private:
+			wchar_t* m_Data{};
 		};
 	}
 
 	bool get(string_view Name, string& Value);
+
+	[[nodiscard]]
 	string get(string_view Name);
+
 	bool set(string_view Name, string_view Value);
+
 	bool del(string_view Name);
+
+	[[nodiscard]]
 	string expand(string_view Str);
+
+	[[nodiscard]]
 	string get_pathext();
 }
 

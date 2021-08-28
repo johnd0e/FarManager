@@ -35,24 +35,31 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Internal:
 #include "scrobj.hpp"
 #include "poscache.hpp"
 #include "bitflags.hpp"
 #include "config.hpp"
-#include "TPreRedrawFunc.hpp"
 #include "mix.hpp"
 #include "eol.hpp"
 
+// Platform:
+
+// Common:
 #include "common/rel_ops.hpp"
+
+// External:
+
+//----------------------------------------------------------------------------
 
 class FileEditor;
 class KeyBar;
 class Edit;
 
-class Editor: public SimpleScreenObject
+class Editor final: public SimpleScreenObject
 {
 public:
-	explicit Editor(window_ptr Owner, bool DialogUsed = false);
+	explicit Editor(window_ptr Owner, uintptr_t Codepage, bool DialogUsed = false);
 	~Editor() override;
 
 	bool ProcessKey(const Manager::Key& Key) override;
@@ -61,16 +68,15 @@ public:
 
 	void SetCacheParams(EditorPosCache &pc, bool count_bom = false);
 	void GetCacheParams(EditorPosCache &pc) const;
-	bool TryCodePage(uintptr_t codepage, int &X, int &Y);
+	bool TryCodePage(uintptr_t Codepage, uintptr_t& ErrorCodepage, size_t& ErrorLine, size_t& ErrorPos, wchar_t& ErrorChar);
 	bool SetCodePage(uintptr_t codepage, bool *BOM=nullptr, bool ShowMe=true); //BUGBUG
 	uintptr_t GetCodePage() const; //BUGBUG
 	void KeepInitParameters() const;
 	void SetStartPos(int LineNum, int CharNum);
-	bool IsFileModified() const;
-	bool IsFileChanged() const;
+	bool IsModified() const;
+	bool IsChanged() const;
 	long long GetCurPos(bool file_pos = false, bool add_bom = false) const;
 	int EditorControl(int Command, intptr_t Param1, void *Param2);
-	void SetHostFileEditor(FileEditor *Editor) { HostFileEditor = Editor; }
 	void SetOptions(const Options::EditorOptions& Options);
 	void SetTabSize(int NewSize);
 	size_t GetTabSize() const { return EdOpt.TabSize; }
@@ -94,7 +100,7 @@ public:
 	int GetReadOnlyLock() const { return EdOpt.ReadOnlyLock; }
 	void SetShowScrollBar(bool NewMode) { EdOpt.ShowScrollBar = NewMode; }
 	void SetSearchCursorAtEnd(bool NewMode) { EdOpt.SearchCursorAtEnd = NewMode; }
-	void SetWordDiv(const wchar_t *WordDiv) { EdOpt.strWordDiv = WordDiv; }
+	void SetWordDiv(string_view const WordDiv) { EdOpt.strWordDiv = string(WordDiv); }
 	const string& GetWordDiv() const { return EdOpt.strWordDiv; }
 	void SetAllowEmptySpaceAfterEof(bool NewMode) { EdOpt.AllowEmptySpaceAfterEof = NewMode; }
 	bool GetAllowEmptySpaceAfterEof() const { return EdOpt.AllowEmptySpaceAfterEof; }
@@ -132,13 +138,12 @@ public:
 	void SetMacroSelectionStart(int Value) { MacroSelectionStart = Value; }
 	int GetLineCursorPos() const { return CursorPos; }
 	void SetLineCursorPos(int Value) { CursorPos = Value; }
-	bool IsLastLine(const Edit* line) const;
+	bool IsLastLine(const Edit* Line) const;
 	void AutoDeleteColors();
 	int GetId() const { return EditorID; }
 
-	static void PR_EditorShowMsg();
 	static void SetReplaceMode(bool Mode);
-	static eol::type GetDefaultEOL();
+	static eol GetDefaultEOL();
 
 	struct EditorUndoData;
 
@@ -181,9 +186,6 @@ private:
 		numbered_iterator_t& operator++() { ++base(); ++m_Number; return *this; }
 		numbered_iterator_t& operator--() { --base(); --m_Number; return *this; }
 
-		bool operator==(const numbered_iterator_t& rhs) const { return base() == rhs.base(); }
-		bool operator==(const T& rhs) const { return rhs == *this; }
-
 		T& base() { return *this; }
 		const std::conditional_t<std::is_base_of_v<ConstT, T>, ConstT, T>& base() const { return *this; }
 		std::conditional_t<std::is_base_of_v<ConstT, T>, const ConstT&, ConstT> cbase() const { return *this; }
@@ -215,22 +217,22 @@ private:
 	void TextChanged(bool State);
 	static int CalcDistance(const numbered_iterator& From, const numbered_iterator& To);
 	void PasteFromClipboard();
-	void Paste(const string& Data);
+	void Paste(string_view Data);
 	void ProcessChar(wchar_t Char);
 	void Copy(int Append);
 	void DeleteBlock();
 	void UnmarkBlock();
 	void UnmarkEmptyBlock();
 	void UnmarkMacroBlock();
-	void AddUndoData(int Type) { return AddUndoData(Type, {}, eol::type::none, 0, 0); }
-	void AddUndoData(int Type, const string& Str, eol::type Eol, int StrNum, int StrPos);
+	void AddUndoData(int Type) { return AddUndoData(Type, {}, eol::none, 0, 0); }
+	void AddUndoData(int Type, string_view Str, eol Eol, int StrNum, int StrPos);
 	void Undo(int redo);
 	void SelectAll();
 	void BlockLeft();
 	void BlockRight();
 	void DeleteVBlock();
 	void VCopy(int Append);
-	void VPaste(const string& Data);
+	void VPaste(string_view Data);
 	void VBlockShift(int Left);
 	numbered_iterator GetStringByNumber(int DestLine);
 	// Set the numbered bookmark (CtrlShift-0..9)
@@ -241,7 +243,7 @@ private:
 	void ClearSessionBookmarks();
 	// Remove a particular session bookmark. Adjusts SessionPos if deleting the current bookmark
 	bool DeleteSessionBookmark(bookmark_list::iterator sb_delete);
-	bool MoveSessionBookmarkToUndoList(bookmark_list::iterator sb_delete);
+	bool MoveSessionBookmarkToUndoList(bookmark_list::iterator sb_move);
 	// Restore the current session bookmark
 	bool RestoreSessionBookmark();
 	// Add current cursor pos to session bookmarks, after the current bookmark, and adjust SessionPos to it
@@ -280,7 +282,7 @@ private:
 	string Block2Text();
 	string VBlock2Text();
 	void Change(EDITOR_CHANGETYPE Type,int StrNum);
-	DWORD SetLineCodePage(const iterator& edit, uintptr_t codepage, bool check_only);
+	bool SetLineCodePage(iterator const& Iterator, uintptr_t Codepage, bool Validate);
 	numbered_iterator InsertString(string_view Str, const numbered_iterator& Where);
 	numbered_iterator PushString(const string_view Str) { return InsertString(Str, EndIterator()); }
 	void TurnOffMarkingBlock();
@@ -302,7 +304,6 @@ private:
 	bool IsLastLine(const iterator& Line) const;
 
 	static bool InitSessionBookmarksForPlugin(EditorBookmarks *Param, size_t Count, size_t& Size);
-	static void EditorShowMsg(const string& Title, const string& Msg, const string& Name, size_t Percent);
 
 	bool IsAnySelection() const { assert(Lines.end() == m_it_AnyBlockStart || m_BlockType != BTYPE_NONE); return Lines.end() != m_it_AnyBlockStart; }
 	bool IsStreamSelection() const { return IsAnySelection() && m_BlockType == BTYPE_STREAM; }
@@ -316,89 +317,81 @@ private:
 	// Младший байт (маска 0xFF) юзается классом ScreenObject!!!
 	enum editor_flags
 	{
-		FEDITOR_MODIFIED = bit(8),
-		FEDITOR_MARKINGBLOCK = bit(9),
-		FEDITOR_MARKINGVBLOCK = bit(10),
-		FEDITOR_WASCHANGED =  bit(11),
-		FEDITOR_OVERTYPE = bit(12),
-		FEDITOR_NEWUNDO = bit(13),
-		FEDITOR_UNDOSAVEPOSLOST = bit(14),
-		FEDITOR_DISABLEUNDO = bit(15),   // возможно процесс Undo уже идет?
-		FEDITOR_LOCKMODE = bit(16),
-		FEDITOR_CURPOSCHANGEDBYPLUGIN = bit(17),   // установлен, если позиция в редакторе была изменена плагином (ECTL_SETPOSITION)
-		FEDITOR_PROCESSCTRLQ = bit(19),   // нажата Ctrl-Q и идет процесс вставки кода символа
-		FEDITOR_DIALOGMEMOEDIT = bit(20),   // Editor используется в диалоге в качестве DI_MEMOEDIT
+		FEDITOR_MODIFIED              = 8_bit,
+		FEDITOR_MARKINGBLOCK          = 9_bit,
+		FEDITOR_MARKINGVBLOCK         = 10_bit,
+		FEDITOR_WASCHANGED            = 11_bit,
+		FEDITOR_OVERTYPE              = 12_bit,
+		FEDITOR_NEWUNDO               = 13_bit,
+		FEDITOR_UNDOSAVEPOSLOST       = 14_bit,
+		FEDITOR_DISABLEUNDO           = 15_bit,   // возможно процесс Undo уже идет?
+		FEDITOR_LOCKMODE              = 16_bit,
+		FEDITOR_CURPOSCHANGEDBYPLUGIN = 17_bit,   // установлен, если позиция в редакторе была изменена плагином (ECTL_SETPOSITION)
+		FEDITOR_PROCESSCTRLQ          = 19_bit,   // нажата Ctrl-Q и идет процесс вставки кода символа
+		FEDITOR_DIALOGMEMOEDIT        = 20_bit,   // Editor используется в диалоге в качестве DI_MEMOEDIT
 	};
-
+	// Editor content state
 	editor_container Lines;
 	numbered_iterator m_it_TopScreen{ EndIterator() };
 	numbered_iterator m_it_CurLine{ EndIterator() };
 	numbered_iterator m_it_LastGetLine{ EndIterator() };
-
-	std::unordered_set<UUID> ChangeEventSubscribers;
 	std::list<EditorUndoData> UndoData;
 	std::list<EditorUndoData>::iterator UndoPos{ UndoData.end() };
 	std::list<EditorUndoData>::iterator UndoSavePos{ UndoData.end() };
 	int UndoSkipLevel{};
 	int LastChangeStrPos{};
-	/* $ 26.02.2001 IS
-	Сюда запомним размер табуляции и в дальнейшем будем использовать его,
-	а не Global->Opt->TabSize
-	*/
-	Options::EditorOptions EdOpt;
-	int Pasting{};
-	eol::type GlobalEOL;
-	// работа с блоками из макросов (MCODE_F_EDITOR_SEL)
+	eol GlobalEOL;
 	numbered_iterator m_it_MBlockStart{ EndIterator() };
 	numbered_iterator m_it_AnyBlockStart{ EndIterator() };
 	EDITOR_BLOCK_TYPES m_BlockType{ BTYPE_NONE };
+	// работа с блоками из макросов (MCODE_F_EDITOR_SEL)
 	int MBlockStartX{};
 	int VBlockX{};
 	int VBlockSizeX{};
 	int VBlockSizeY{};
-	int MaxRightPos{};
-	int XX2{}; //scrollbar
-	string strLastSearchStr;
-	bool LastSearchCase{}, LastSearchWholeWords{}, LastSearchReverse{}, LastSearchRegexp{}, LastSearchPreserveStyle{};
-	uintptr_t m_codepage{ CP_DEFAULT }; //BUGBUG
-	int m_StartLine{-1};
-	int StartChar{-1};
+	int MacroSelectionStart{ -1 };
+	uintptr_t m_codepage; //BUGBUG
+	int m_StartLine{ -1 };
+	int StartChar{ -1 };
 	//numbered bookmarks (accessible by Ctrl-0..9)
 	Bookmarks<editor_bookmark> m_SavePos;
-
 	bookmark_list SessionBookmarks;
 	//pointer to the current "session" bookmark (in the list of "session" bookmarks accessible through BM.Goto(n))
 	bookmark_list::iterator SessionPos{ SessionBookmarks.end() };
-
 	bool NewSessionPos{};
-	int EditorID{};
-	FileEditor *HostFileEditor{};
-	int EditorControlLock{};
 	std::vector<char> decoded;
-	FarColor Color;
-	FarColor SelColor;
-	int MacroSelectionStart{-1};
-	int CursorPos{};
-	std::unordered_set<Edit*> m_AutoDeletedColors;
-
-	bool fake_editor{};
-
 	numbered_iterator m_FoundLine{ EndIterator() };
 	int m_FoundPos{};
 	int m_FoundSize{};
-
-	int m_InEERedraw{};
-
-	bool m_GotoHex{};
-
-	struct EditorPreRedrawItem : public PreRedrawItem
+	std::unordered_set<Edit*> m_AutoDeletedColors;
+	struct
 	{
-		EditorPreRedrawItem();
-		string Title;
-		string Msg;
-		string Name;
-		size_t Percent{};
-	};
+		std::optional<std::pair<const_iterator, int>> m_LastState;
+
+		int Position{};
+	}
+	MaxRightPosState;
+
+	bool fake_editor{};
+	// Editor content state end
+	// No iterators or anything content-related after this point
+	// Don't forget to update SwapState() when needed.
+
+
+	std::unordered_set<UUID> ChangeEventSubscribers;
+	Options::EditorOptions EdOpt;
+	int Pasting{};
+	int XX2{}; //scrollbar
+	string strLastSearchStr;
+	bool LastSearchCase{}, LastSearchWholeWords{}, LastSearchReverse{}, LastSearchRegexp{}, LastSearchPreserveStyle{};
+
+	int EditorID{};
+	int EditorControlLock{};
+	FarColor Color;
+	FarColor SelColor;
+	int CursorPos{};
+	int m_InEERedraw{};
+	bool m_GotoHex{};
 };
 
 class EditorContainer
