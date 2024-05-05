@@ -2213,6 +2213,9 @@ static unsigned int CalcKeyCode(INPUT_RECORD* rec, bool RealKey, bool* NotMacros
 	case VK_PAUSE:
 		return Modif | ((CtrlState & ENHANCED_KEY)? KEY_NUMLOCK : KEY_PAUSE);
 
+	case VK_CANCEL:
+		return Modif | ((CtrlState & ENHANCED_KEY)? KEY_BREAK : KEY_SCROLLLOCK);
+
 	case VK_SPACE:
 		if (Char == L' ' || !Char)
 			return Modif | KEY_SPACE;
